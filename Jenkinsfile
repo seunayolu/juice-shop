@@ -1,119 +1,182 @@
 pipeline {
-    agent any
-
+    agent none
+    
     environment {
-        registryCreds = 'ecr:eu-west-2:awscreds'
-        repoUri = "442042522885.dkr.ecr.eu-west-2.amazonaws.com/fruitstore"
-        repoRegistryUrl = "https://442042522885.dkr.ecr.eu-west-2.amazonaws.com"
-        cluster = "webapp"
-        service = "webapptask-svc"
+        IMAGE_NAME = "oluwaseuna/juice-shop-app"
+        IMAGE_TAG = "1.0"
+        SONAR_SCANNER_CLI = "sonarsource/sonar-scanner-cli:latest"
+        DOCKER_CREDENTIALS = credentials('docker_credentials') // Add Jenkins credential id for Docker login
+        SONAR_TOKEN = credentials('sonar_token') // Add Jenkins credential id for SonarQube token
     }
-
+    
     stages {
-        /*stage('Code Analysis') {
+        stage('Cache') {
+            agent {
+                docker {
+                    image 'node:18-bullseye'
+                    reuseNode true
+                }
+            }
+            steps {
+                script {
+                    sh 'yarn install'
+                }
+            }
+            post {
+                always {
+                    stash includes: 'node_modules/**/*, yarn.lock, .yarn/**/*', name: 'yarn_cache'
+                }
+            }
+        }
+
+        stage('Yarn Test') {
+            agent {
+                docker {
+                    image 'node:18-bullseye'
+                    reuseNode true
+                }
+            }
+            steps {
+                unstash 'yarn_cache'
+                script {
+                    sh 'yarn install'
+                    sh 'yarn test'
+                }
+            }
+        }
+
+        /*stage('Gitleaks') {
+            agent {
+                docker {
+                    image 'zricethezav/gitleaks'
+                    args '-u root'
+                    reuseNode true
+                }
+            }
+            steps {
+                script {
+                    sh 'gitleaks detect --verbose --source . -f json -r gitleaks.json'
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'gitleaks.json'
+                }
+            }
+        }
+
+        stage('NJSSCAN') {
+            agent {
+                docker {
+                    image 'python'
+                    reuseNode true
+                }
+            }
+            steps {
+                script {
+                    sh 'pip3 install --upgrade njsscan'
+                    sh 'njsscan --exit-warning . --sarif -o njsscan.sarif'
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'njsscan.sarif'
+                }
+            }
+        }
+
+        stage('Semgrep') {
+            agent {
+                docker {
+                    image 'semgrep/semgrep'
+                    reuseNode true
+                }
+            }
             environment {
-                scannerHome = tool 'sonar-scanner-6'
+                SEMGREP_RULES = "p/javascript"
             }
             steps {
                 script {
-                    echo "Code Analysis with SonarQube..."
-                    withSonarQubeEnv('sonar-server') {
-                        sh '''${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=fruitstore \
-                        -Dsonar.projectName=fruitshop \
-                        -Dsonar.projectVersion=1.0 \
-                        -Dsonar.sources=.'''
+                    sh 'semgrep ci --json --output semgrep.json'
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'semgrep.json'
+                }
+            }
+        }
 
+        stage('Retire.js') {
+            agent {
+                docker {
+                    image 'node:18-bullseye'
+                    reuseNode true
+                }
+            }
+            steps {
+                unstash 'yarn_cache'
+                script {
+                    sh 'npm install -g retire'
+                    sh 'retire --path . --outputformat json --outputpath retire.json'
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'retire.json'
+                }
+            }
+        }
+
+        stage('SonarQube Scan') {
+            agent {
+                docker {
+                    image env.SONAR_SCANNER_CLI
+                    reuseNode true
+                }
+            }
+            steps {
+                script {
+                    sh "sonar-scanner -Dsonar.token=${env.SONAR_TOKEN}"
+                }
+            }
+        }
+
+        stage('Upload Reports') {
+            agent {
+                docker {
+                    image 'python'
+                    reuseNode true
+                }
+            }
+            steps {
+                script {
+                    sh 'pip3 install requests'
+                    sh 'python3 upload-reports.py gitleaks.json'
+                    sh 'python3 upload-reports.py njsscan.sarif'
+                    sh 'python3 upload-reports.py semgrep.json'
+                    sh 'python3 upload-reports.py retire.json'
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            agent {
+                docker {
+                    image 'docker:27'
+                    args '--privileged'
+                    reuseNode true
+                }
+            }
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'docker_credentials', passwordVariable: 'DOCKER_PASS', usernameVariable: 'DOCKER_USER')]) {
+                        sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
                     }
+                    sh "docker build -t ${env.IMAGE_NAME}:${env.IMAGE_TAG} ."
+                    sh "docker push ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
                 }
             }
         }*/
-        stage ('Build_Docker_Image') {
-            steps {
-                script {
-                    echo 'Build Docker Image from Dockerfile...'
-                    dockerImage = docker.build (repoUri + ":$BUILD_NUMBER")
-                }
-            }
-        }
-
-        stage('Push_Image_to_ECR') {
-            steps {
-                script {
-                    echo "Pushing Docker Image to ECR..."
-                    docker.withRegistry(repoRegistryUrl, registryCreds) {
-                        dockerImage.push("$BUILD_NUMBER")
-                        dockerImage.push('latest')
-                    }
-                }
-            }
-        }
-
-        /*stage ('Deploy to ECS') {
-            steps {
-                script {
-                    echo "Deploying Image to ECS..."
-                    withAWS(credentials: 'awscreds', region: 'eu-west-2') {
-                        sh 'aws ecs update-service --cluster ${cluster} --service ${service} --force-new-deployment'
-                    }
-                }
-            }
-        }*/
-
-        stage('Prune Docker System') {
-            steps {
-                script {
-                    echo 'Pruning Docker System'
-                    sh 'docker system prune -af'
-                }
-            }
-        }
-    }
-    post {
-        always {
-            echo 'Notify Team members on Slack...'
-        
-            script {
-                // Define the COLOR_MAP directly here
-                def COLOR_MAP = [
-                'SUCCESS': '#00FF00', // Green
-                'FAILURE': '#FF0000', // Red
-                'UNSTABLE': '#FFFF00', // Yellow
-                'ABORTED': '#808080'  // Gray
-                ]
-            
-                // Check if the COLOR_MAP and currentResult are set
-                def buildResult = currentBuild.currentResult ?: 'UNKNOWN'
-                def color = COLOR_MAP[buildResult] ?: '#FFFF00' // default to yellow if not found
-            
-                // Additional build information
-                def buildDuration = currentBuild.durationString
-                def triggeredBy = 'Unknown'
-                if (currentBuild.getBuildCauses()) {
-                    for (cause in currentBuild.getBuildCauses()) {
-                        if (cause.userId) {
-                            triggeredBy = cause.userId
-                            break
-                        }
-                    }
-                }
-            
-                // Slack message content
-                def message = """
-                    *${buildResult}:* Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}
-                    Triggered by: ${triggeredBy}
-                    Duration: ${buildDuration}
-                    More info at: ${env.BUILD_URL}
-                """.stripIndent()
-            
-                // Send the Slack notification
-                try {
-                    slackSend channel: '#jenkins-build',
-                          color: color,
-                          message: message
-                } catch (Exception e) {
-                    echo "Failed to send Slack notification: ${e.message}"
-                }
-            }
-        }
     }
 }
