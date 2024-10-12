@@ -1,13 +1,13 @@
 pipeline {
     agent none
     
-    environment {
+    /*environment {
         IMAGE_NAME = "oluwaseuna/juice-shop-app"
         IMAGE_TAG = "1.0"
-        SONAR_SCANNER_CLI = "sonarsource/sonar-scanner-cli:latest"
-        DOCKER_CREDENTIALS = credentials('docker_credentials') // Add Jenkins credential id for Docker login
+        //SONAR_SCANNER_CLI = "sonarsource/sonar-scanner-cli:latest"
+        //DOCKER_CREDENTIALS = credentials('docker_credentials') // Add Jenkins credential id for Docker login
         SONAR_TOKEN = credentials('sonar_token') // Add Jenkins credential id for SonarQube token
-    }
+    }*/
     
     stages {
         stage('Cache') {
